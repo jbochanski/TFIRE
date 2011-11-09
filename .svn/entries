@@ -1,0 +1,92 @@
+10
+
+dir
+34
+svn://pele.mit.edu/FIRE
+svn://pele.mit.edu
+
+
+
+2011-05-19T23:49:32.835398Z
+31
+mmatejek
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+f5a4437f-b60a-443a-9f15-45e3f4db9034
+
+Utils
+dir
+
+LowDispersion
+dir
+
+Proc
+dir
+
+firehose.pro
+file
+
+
+
+
+2011-05-31T15:11:09.000000Z
+5666e5ea55f2c3fa9fae44ffe48b118d
+2011-05-19T02:26:52.543121Z
+29
+mmatejek
+has-props
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+72524
+
+Doc
+dir
+
+Flat
+dir
+
+Arcs
+dir
+
+Calib
+dir
+
+Extract
+dir
+
+Spextool
+dir
+
+Flux
+dir
+

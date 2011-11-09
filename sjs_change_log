@@ -1,0 +1,156 @@
+random: when tracing initally, check interactive. a marks peaks.
+
+--> fire_get_fitnum
+lines 17 and 26, commented out line with underscore to deal with TUI naming conventions
+
+--> fire_oscan
+line 26 and 27 changed to set gain to 3.5 from Tspec users manual
+lines 29-40 changes to set read noise to 18/sqrt(nfowler). Commented out all the original code and added 2 lines
+lines 50 and 51 changed to accept the read nrow and ncol
+note: I still have qualms because there is no "overscan" region in the data - i want to see the fire data to check if there is in that data.
+
+--> fire_traceorders
+line 109 changed norders to 5
+line 137 and 138 commented out pre-stored edgest (i will enter my own if needed)
+line 435 changed order mask to 76543
+line 462 changed generation of ordr_str structure to reflect order numebrs 
+line 169 and 170 changed the sort to a reverse sort so that the order of the peaks would be ok
+line 171 and 217 - 219 changed 21 to 5 for maximum number of peaks and 20 to 4 for sort
+
+--> fire_find_edges
+line 166 added cutoff = abs(cutoff) because of a problem where the cutoff was negative. This may be due to a oversubtraction issue...
+line 118 added nx = 900 to stop it from finding peaks after that (the Tspec data stops @ ~820).
+
+--> fire_findslits
+line 78 commented out fsr
+
+--> firehose
+line 300, 305 564, 569, 572, 573, 580, 583, 585 changed _ to _. for more flexible naming
+
+--> fire_makeflat
+line 70 changed norders from 21 to 5
+line 130 and 146 commented out fsr
+
+--> fire_superflat_superfast
+lines 36-39 commented out so that we don't cut out orders
+lines 49 and 50 changed to the tspec number of orders
+line 24 commented out keyword to call free spectral range
+line 167 and 180 changed 32 to 8 to have the output message make sense
+line 208 deleted fsr
+
+--> fire_scattlight
+lines 36-39 commented out so that we don't cut out orders
+
+--> fire_ordermask
+line 53 changed 32 to 8 to reflect order numbering
+lines 91 and 92 commented out to leave whole orders intact (line 86 is coincidentally very good - order 31 = order 7)
+line 95 changed to remove *ord30mask*ord29mask
+
+--> fire_mkstruct
+line 1055 deleted fire*.fits > *.fits
+1072 - end = mass carnage. Also, the object id only works if you name your objects by their name. other fields should be more general apo tspec.
+
+
+--> fire_nums_to_filenames
+modified most of this short program to list real files from the raw directory instead of making up their own names.
+
+Don't try:
+more than one flat in the trace flat box (more errors to be debugged - also only need one)
+
+;---------------------------- above was needed to get through structure step below...
+
+--> f_fitpixarc
+line 231 added a manual fix to ordr_str.order, don't know where to fix original
+line 312 changed for reflect different orders
+line 331 changed to exclude parts of order 7 instead of the nonexistant 31
+line 350 THIS IS WHERE TO GET ARC
+line 609 commented out because that is always the error message
+line 1137 replaced to check if structure exists before clearing pointer
+
+--> fire_arc2
+line 137 changed for naming conventions
+line 84 changed to set the slit to 1.1
+line 88 not changed but i think it should be....
+line 152 changed to take out maskbadpix - no current tspec mask
+line 191 changed with my own guess
+line 229 changed with the correct dimensions
+
+--> fire_wavepix
+line 7 commented out fsr
+line 66 commented out due to lack of bad pixel mask
+lines 160-162 commented out to keep good data
+line 157 changed to reflect correct order
+line 370 changed to 0 to allow some good tilts
+line 804 to 808 commented out to keep good data
+line 799 changed the 600ish to 1000 to keep right amount of curved order
+
+;------ now we've got a wavelength solution, i think....
+--> fire_findobj
+line 122 reset to have 5 orders instead of 21
+lkine 139 commented out for fsr
+
+
+--> fire_pipe 
+lines 317-322 commented out, line 328 replaces commented above to make science image act as lamp
+line 431 changed comment to be gender neutral
+line 560 commented out, i dont care about the lamp keyword
+line 566 changed to use OH lines (because it's the science image used as arc)
+
+--> fire_proc
+lines 125-130 commented out to prevent bad pixel mask
+
+--> fire_echjoefind 
+line 164 change 31 to 7 so it will work.
+line 151 changed to comment out fsr
+line 231 changed 31 to 7
+line 68 changed stdsep to 2 to group slightly more distant object together
+
+--> fire_echextobj
+line 193 21 rplaced with 5
+lines 207 to 209 replaced with new order centers
+line 229 to 234 commented out, replaced with 235 from tspec header
+line 252 to 273 commented or changed for the wavelength starts of tspec
+line 279 to 300 commented or changed for the wavelength ranges of tspec
+line 309 commented out fsr because i dont like it
+line 358 to 360 modified with a function for Tspec headers
+line 367 changed to do calculation for apo (also added apo to program)
+line 372 edited to take object name from header
+line 396 changed 31 to 7
+line 401 changed 31 to 5
+line 487 changed to 7
+line 503 changed to 7
+line 510 changed to 7
+line 477 514 516 519 524 530 533 535 643 changed to 7
+line 616-819 deleted additional keywords so header would write correctly
+
+--> x_keck_helio
+replaced with x_apohelio, a copy with APO's info
+
+--> fire_localskysub
+line 310 replaced rn_img readnoise with 0's
+
+------Telluric
+
+--> fire_stdcombine
+line 42 changed 20 to 4
+line 47 changed 21 to 5
+
+--> fire_xtellcor
+line 758 added call to a program that will get the filename
+line 766-768 deleted parameters that don't exist
+
+--> fire_esi_echcombspec.pro
+line 100 changed order numbers
+line 125 changed 21 to 5
+line 170 commented out
+
+
+--> fire_1dspec
+line 71 changed velpix to 30 - need to check
+line 131 guessed the cnst based on edges of orders and eqn given - 66000 or so
+lines 134-138 commented out math
+line 221 and 222 changed 0.02 to 0.03
+line 227 changed 11L to 3L
+
+-----::::::::-----
+Very important to keep cdelt the same. (in fire_echextobj and the other writing out programs) the value I've chosen is 30.5.

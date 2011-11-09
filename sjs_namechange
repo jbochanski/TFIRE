@@ -1,0 +1,41 @@
+--> fire_get_fitnum (replaced with tspec_get_fitnum)
+--> fire_oscan (replaced with tspec_oscan)
+--> fire_traceorders (replaced)
+--> fire_find_edges (replaced)
+--> fire_findslits (replaces)
+--> firehose (renamed firehose_tspec)
+--> fire_makeflat (replaced)
+--> fire_superfast_superflat (replaced)
+--> fire_scattlight (replaced)
+--> fire_ordermask (replaced)
+--> fire_mkstrct (replaced)
+--> fire_nums_to_filenames (replaced)
+--> f_fitpixarc (replaced with t_fitpixarc)
+--> fire_arc2 (replaced)
+--> fire_wavepix (replaced)
+--> fire_findobj (replced)
+--> fire_pipe (replced) 
+--> fire_proc (replced)
+--> fire_echjoefind (replaced)
+--> fire_echextobj (replaced)
+--> fire_localskysub (replaced)
+--> fire_stdcombine (replaced)
+--> fire_xtellcor (replaced)
+--> fire_esi_echcombspec (replaced)
+--> fire_1dspec (replaced)
+
+had to change b/c they called to the above:
+
+fire_findslits
+fire_get_file_names
+names_to_list --> tspec_names_to_list
+fire_makescipix
+fire_combine_flats
+fire_get
+firestrct_fill_filenames
+fire_set
+update_firestrct_tell_info
+fire_editstrct
+fire_skymodel
+fire_guicombine
+fire_combspec

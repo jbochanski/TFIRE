@@ -1,0 +1,743 @@
+pro fire_pipe_widget_status, message, VERBOSE=verbose, $
+                             WIDGET=widget, _EXTRA = keys
+
+  if keyword_set(VERBOSE) AND keyword_set(WIDGET) then begin
+     WIDGET_CONTROL, widget, set_value=message, _EXTRA = keys
+  endif
+  
+  RETURN
+  
+end
+
+
+
+pro fire_pipe, fire, targets=targetnames, clobber=clobber, $
+               verbose=verbose, chk=chk, debug=debug, $
+               widget=widget, reduxpath=reduxpath, BRIGHT=bright,$
+               PLOT_INFO=plot_info, _EXTRA=keys
+  
+  func_name = 'fire_pipe'
+  
+  print, func_name + ": Starting Reduction loop"
+
+	if NOT keyword_set(PLOT_INFO) then NOPLOT = 1
+  
+  ntargs = n_elements(targetnames)
+  
+  fire_pipe_widget_status, func_name + ":  Will run pipeline on " + $
+                           fire_string(ntargs) + $
+                           " object" + s_or_not(ntargs) + $
+                           ":", VERBOSE=verbose, WIDGET=widget, _EXTRA=keys
+
+  fire_pipe_widget_status, "    " + targetnames, VERBOSE=verbose, $
+                           WIDGET=widget, _EXTRA=keys
+  
+  ;; Cycle through the list of science objects
+  for itarg=0, ntargs-1 do begin
+     
+     sci = where(fire.object EQ targetnames[itarg] AND $
+                 strupcase(strtrim(fire.exptype,2)) EQ "SCIENCE", nmatch)
+     
+     if (nmatch EQ 0) then begin
+        print, "No frames found for this target"
+        continue
+     endif
+     
+     fire_pipe_widget_status, func_name + $
+                              ": Running pipeline on object " + $
+                              targetnames[itarg], $
+                              VERBOSE=verbose, WIDGET=widget, _EXTRA = keys
+     
+     ;; Cycle through the science frames taken for each object
+     for iframe=0, nmatch-1 do begin
+        
+        ;; In order for fire_get to save any values in the structure (or
+        ;; for any values to be saved within fire programs) we must avoid using a
+        ;; subset of a structure (wierd IDL quirk).
+        ;; Later on we reset fire[sci[iframe]] = scistruct
+        scistruct = fire[sci[iframe]]
+        ;; Determine the important file names
+        rawpath = fire_get(scistruct, /rawpath)
+        scifil1 = strtrim(fire_get(scistruct, /fitsfile, /donotcalc),2)
+        scifil  = rawpath + scifil1
+        pixflat = fire_get(scistruct, /Pixflatfile)
+        illum   = fire_get(scistruct, /Illumflatfile)
+        
+        tell    = fire_get(scistruct, /TFiles)
+        ntells = n_elements(tell)
+        
+        ;; Determine if a telluric has not been matched.  If so, let the user extract the object, but then
+        ;; warn him or her later on down the road
+        bad_tells = 0
+        if is_empty(tell) EQ 1 then begin
+        		bad_tells = 1
+        endif else if ntells EQ 1 then begin
+        		if strmatch(strtrim(tell,2),"unknown",/FOLD_CASE) EQ 1 then begin
+        			bad_tells = 1
+           endif
+        endif
+        
+        ordrfil = fire_get(scistruct, /Orderfile)
+        ostrfil = fire_get(scistruct, /Ordr_str_file)
+        
+        objname = fire_get(scistruct, /Object) + " (" + fire_get_fitnum(scifil1) + ")"
+
+        fire_pipe_widget_status, "  Analyzing exposure " + scifil + $
+                                 " (file " + fire_string(iframe+1) + " of " + $
+                                 fire_string(nmatch) + " for object " + $
+                                 fire_string(itarg+1) + " of " + fire_string(ntargs) + ")", $
+                                 VERBOSE=verbose, WIDGET=widget, _EXTRA = keys
+        
+        ;; Determine whether to use OH lines from the science image itself, or
+        ;; ThAr lines from an arc file based upon the exposure time.
+        min_time_for_OH = 300 ;; minimum allowed time for using OH lines
+        exptime = fire_get(scistruct, /Exptime)			
+        ;if exptime LT min_time_for_OH then begin
+        ;   THAR = 1
+        ;   fire_undefine, OH
+        ;endif else begin
+        ;   OH = 1
+        ;   fire_undefine, THAR
+        ;endelse
+        if scistruct.OH_cal EQ 0 then begin
+           THAR = 1
+           fire_undefine, OH        	
+        endif else begin
+           OH = 1
+           fire_undefine, THAR        
+        endelse
+        
+        if keyword_set(OH) then begin
+           wcfile = rawpath + fire_get(scistruct, /WAVECALFILE, /OH) ;; wavelength calibration filename
+           wcfits = fire_get(scistruct, /ARCFITS, /OH) ;; output wavelength calibration fits filename
+           wcimg = fire_get(scistruct, /ARCIMGFITS, /OH) ;; output wavelength calibration image filename
+        endif else if keyword_set(THAR) then begin
+           wcfile = fire_get(scistruct, /WAVECALFILE, /THAR)           ;; wavelength calibration file
+           wcfits = fire_get(scistruct, /ARCFITS, /THAR) ;; output wavelength calibration fits filename
+           wcimg = fire_get(scistruct, /ARCIMGFITS, /THAR) ;; output wavelength calibration image filename
+        endif else begin
+           fire_siren, func_name + ": ERROR! Must be using either OH or THAR lines for " + $
+                       "wavelength calibration!  Skipping this exposure!", WIDGET=widget, /append, /both
+           fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+           continue
+        endelse
+
+         ;; Make sure it retrieved something...
+         if( is_empty(wcfile) EQ 1 ) then begin
+         	fire_siren, func_name + ": ERROR! Could not retrieve wavelength calibration file " + $
+            	"for science file " + scifil + "!  Skipping this exposure...", WIDGET=widget, /append, /both
+            fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+            continue           		
+         endif
+
+       if keyword_set(VERBOSE) then begin
+           print, ''
+           print, "++++++++++++++++++++++++++++++++++++"
+           print, func_name, ": /VERBOSE flag passed."
+           print, "WAVELENGTH CALIBRATION details:"
+           print, ""
+           print, "Important input values:"
+           print, "Science file: ", scifil
+           print, "Rawpath to data: ", rawpath
+           print, "Use ThAr? ", yes_if_defined(ThAr)
+           print, "Use OH (in science file)? ", yes_if_defined(OH)
+           print, "Wavelength calibration file: ", wcfile
+           print, "Pixel flat file name: ", pixflat
+           print, "Illumination flat file name: ", illum
+           print, "Order file name: ", ordrfil
+           print, "Order structure file name: ", ostrfil
+           print, ""			
+           print, "Output file names will be:"
+           print, "wavelength calibration fits file: ", wcfits
+           print, "wavelength calibration image file: ", wcimg
+           print, ""
+           print, "General info:"
+           print, "Pass /chk? ", yes_if_defined(CHK)
+           print, "Clobber? ", yes_if_defined(CLOBBER)
+           print, "++++++++++++++++++++++++++++++++++++"
+           print, ''
+           if keyword_set(DEBUG) then stop
+        endif		
+
+        ;; Make sure that the order file has been created
+        if (x_chkfil(ordrfil) EQ 0) then begin
+           fire_siren, "You should have generated an order mask already.  Skipping this exposure!", $
+           		WIDGET=WIDGET, /append, /both
+           fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+           continue
+           ;; If it has, then read it in.
+        endif else begin
+           tset_slits = xmrdfits(ordrfil, 1)
+        endelse
+        
+        ;;;;; CALIBRATE AND EXTRACT THE SCIENCE OBJECT ;;;;;;;;;
+        
+        ;; If either the output img doesn't exist, or /clobber has been passed, then
+        ;; run fire_arc on this object.
+        if ( x_chkfil(wcimg, /SILENT) EQ 0 OR keyword_set(CLOBBER) ) then begin
+           
+           ;; Use ThAr arc file if THAR is defined
+           if keyword_set(THAR) then begin
+              
+              ;; Quick check to make sure that a ThAr lamp is actually on
+              if sxpar(headfits(wcfile),"LAMP") NE 'ThAr' then begin
+                 fire_siren, func_name + ": ERROR! We cannot use ThAr lines to calibrate file " + $
+                             wcfile + " because the ThAr lamp is not on!  Skipping this exposure!", $
+                             WIDGET=WIDGET, /append, /both
+             		fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+                 continue
+              endif
+              
+              ;; Run the wavelength calibration.
+;              fire_arc, arcraw = wcfile, ordr_str=mrdfits(ostrfil,1), $
+;                        arcfits=wcfits, $
+;                        arcimgfits=wcimg, /ThAr, reduxpath=reduxpath, $
+;                        CLOBBER=clobber, CHK=chk
+
+              result=fire_arc2(arcraw = wcfile, ordr_str=mrdfits(ostrfil,1), $
+                        arcfits=wcfits, arcimgfits=wcimg, /ThAr, $
+                        reduxpath=reduxpath, OBJNAME=objname, NOPLOT=noplot, $
+                        CLOBBER=clobber, ordermask=ordrfil, CHK=chk, ERR_MESSAGE=err_message)
+				  if result EQ -1 then begin
+				  		fire_siren, func_name + ": Wavelength calibration FAILED (" + err_message + ")!  Skipping exposure.", WIDGET=WIDGET, /append, /both
+              		fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+				  		continue
+				  	endif
+              
+              ;; Else, use OH lines from science file if OH is defined.
+           endif else if keyword_set(OH) then begin
+              
+              ;; Quick check of the integration time length
+              if (exptime LT min_time_for_OH) then begin
+                 fire_siren, func_name + "WARNING: Attempting an OH line wavelength soln on a frame with exptime < " + $
+                             fire_string(min_time_for_OH) + " sec.  The lines are faint and there is a real possiblility of strange solutions.  Check the output!"
+              endif
+              
+              ;; Run the wavelength calibration.
+;              fire_arc, arcraw = strtrim(wcfile,2), $
+;                        ordr_str=mrdfits(strtrim(ostrfil,2),1), $
+;                        arcfits=strtrim(wcfits,2), $
+;                        arcimgfits=strtrim(wcimg,2), reduxpath=reduxpath, $
+;                        /OH, CLOBBER=clobber, CHK=chk
+
+              result=fire_arc2(arcraw = strtrim(wcfile,2), $
+                         ordr_str=mrdfits(strtrim(ostrfil,2),1), $
+                         arcfits=strtrim(wcfits,2), arcimgfits=strtrim(wcimg,2), /OH, $
+                         reduxpath=reduxpath, OBJNAME=objname, NOPLOT=noplot, $
+                         CLOBBER=clobber, CHK=chk, ordermask=ordrfil, ERR_MESSAGE=err_message)
+				  if result EQ -1 then begin
+				  		fire_siren, func_name + ": Wavelength calibration FAILED (" + err_message + ")!  Skipping exposure.", WIDGET=WIDGET, /append, /both
+              		fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+				  		continue
+				  	endif
+              
+              ;; Else, we have trouble!  Either OH or ThAr must be used.  Let the user figure it out
+           endif else begin
+              
+              fire_siren, func_name + ": ERROR! Must use either OH lines or ThAr lines!  Skipping this science exposure!", WIDGET=WIDGET, /append, /both
+              fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+              continue
+              
+           endelse
+
+           fire_pipe_widget_status, "    ...done with wavelength calibration", VERBOSE=verbose, WIDGET=widget, _EXTRA = keys
+           
+        endif else begin
+           
+           print, func_name + ": ARC SOLUTION ALREADY EXISTS (and /clobber not passed), SKIPPING...."
+				fire_pipe_widget_status, "    ...done with wavelength calibration (already existed, /clobber not passed)", $
+					VERBOSE=verbose, WIDGET=widget, _EXTRA = keys
+           
+        endelse
+
+        ;; Read in the wavelength image (just created by fire_arc)
+        if (x_chkfil(wcimg) EQ 0 ) then begin
+           fire_siren, "Wavelength calibration image (" + wcimg + ") does not exist!" + $
+           	"  fire_arc FAILED!  Skipping exposure...", WIDGET=WIDGET, /append, /both
+           fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+           continue
+        ;; If it has, then read it in.
+        endif else begin
+           waveimg = xmrdfits(wcimg)
+        endelse			
+        
+        ;; Determine the important file names
+        objstrfil = fire_get(scistruct, /OBJSTRFILE)
+        outfil = fire_get(scistruct, /ECHEXTFILE) 
+        outfilzip = outfil + '.gz' ;; doesn't appear to be used...
+        
+        ;; If /verbose is passed, then print out current values of key variables
+        if keyword_set(VERBOSE) then begin
+           print, ''
+           print, "++++++++++++++++++++++++++++++++++++"
+           print, func_name, ": /VERBOSE flag passed."
+           print, "EXTRACTION details:"
+           print, ""
+           print, "Important input values:"
+           print, "Rawpath to data: ", rawpath
+           print, "Wavelength image file: ", wcimg
+           print, "Pixel flat file name: ", pixflat
+           print, "Illumination flat file name: ", illum
+           print, "Order file name: ", ordrfil
+           print, "Order structure file name: ", ostrfil
+           print, ""			
+           print, "Output file names will be:"
+           print, "Object structure file: ", objstrfil
+           print, "Extracted object file: ", outfil
+           print, ""
+           print, "General info:"
+           print, "Pass /chk? ", yes_if_defined(CHK)
+           print, "Clobber? ", yes_if_defined(CLOBBER)
+           print, "++++++++++++++++++++++++++++++++++++"
+           print, ''
+           if keyword_set(DEBUG) then stop
+        endif		
+        
+        ; NOW PROCESS AND EXTRACT
+        
+        ;; If either the the output structure file doesn't exist, or /clobber has been passed, then
+        ;; run the extraction on this object.
+        if (x_chkfil(objstrfil, /SILENT) EQ 0) OR keyword_set(CLOBBER) then begin
+           
+           ;; Trim, flat field, etc
+           fire_proc, strtrim(scifil,2), sciimg, sciivar, hdr=scihdr, $
+                      pixflatfile=strtrim(pixflat,2),$
+                      illumflatfile=strtrim(illum,2), /MASKBADPIX
+           
+           ;; If we're using a ThAr arcfile, then we must run fire_proc on the arc image
+           if keyword_set(THAR) then begin
+              fire_proc, wcfile, arcimg, arcivar, hdr=archdr, $
+                         pixflatfile=pixflat,$
+                         illumflatfile=illum, /MASKBADPIX
+              piximg = fire_makescipix(arcimg, tset_slits, arc2=arcimg, CHK=chk)
+              
+           ;; If we're instead using OH lines, then pull piximg from the science file
+           endif else begin
+              thar_fits = fire_get(scistruct, /ARCS)
+				  if is_empty(thar_fits) EQ 1 then begin
+						fire_siren, func_name + ": ERROR! 'ARCFILE' unknown!  Edit firestrct and try again later." + $
+							"  Skipping this exposure for now...", WIDGET=WIDGET, /append, /both
+				  		fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+              		continue					  
+				  endif
+              narcs = n_elements(thar_fits)
+              if narcs GT 1 then begin
+              		thar_fits = thar_fits[narcs-1]
+              endif
+              fire_proc, thar_fits, arcimg, arcivar, hdr=archdr, $
+                         pixflatfile=pixflat,$
+                         illumflatfile=illum, /MASKBADPIX
+              piximg = fire_makescipix(sciimg, tset_slits, arc2=arcimg, CHK=chk)
+           endelse
+
+				if size(piximg, /type) EQ 2 then begin
+					fire_siren, func_name + ": ERROR with fire_makescipix!  Skipping this exposure for now...", $
+					WIDGET=WIDGET, /append, /both
+			  		fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+	         	continue
+				endif
+           
+                                ; Fit the 2D sky
+           skyimage = fire_skymodel(sciimg=sciimg, sciivar=sciivar, $
+                                    piximage=piximg $
+                                    ,tset_slits=tset_slits)
+
+           fire_pipe_widget_status, "    ...done creating sky model", $
+                                    VERBOSE=verbose, WIDGET=widget, $
+                                    _EXTRA = keys
+           
+                                ; Object Finding
+           imgminsky=sciimg-skyimage
+           obj_strct = fire_findobj(img_minsky=imgminsky,$
+                                    sciivar=sciivar,waveimg=10^waveimg,$
+                                    tset_slits=tset_slits,filstd=filstd, $
+                                    nfind=1, chk=chk)
+           
+           if size(obj_strct,/type) NE 8 then begin
+              fire_siren, func_name + ": ERROR! fire_findobj failed (output not of correct type) " + $
+                          "for science file " + scifil + "!  Skipping this exposure...", WIDGET=widget, /append, /both
+              fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+              continue
+           endif
+           
+           
+           fire_pipe_widget_status, "    ...done finding object", VERBOSE=verbose, $
+                                    WIDGET=widget, _EXTRA = keys
+           
+           ; Extract the science object (SLOW)
+           if (NOT keyword_set(BRIGHT)) then begin
+              result = fire_echextobj(sciimg=sciimg, sciivar=sciivar, scihdr=scihdr, $
+                              skyimage=skyimage,$
+                              piximg=piximg, waveimg=10^waveimg, $
+                              tset_slits=tset_slits, objfile=objstrfil, $
+                              objstr=obj_strct, outfil=outfil, $
+                              reduxdir=reduxdir, NOPLOT=noplot, $
+                              CHK=chk, /HELIO_CORR, OBJNAME=objname)
+           endif else begin
+              ; Boxcar for bright objects if the user selects
+              result = fire_echextobj(sciimg=sciimg, sciivar=sciivar, scihdr=scihdr, $
+                              skyimage=skyimage,$
+                              piximg=piximg, waveimg=10^waveimg, $
+                              tset_slits=tset_slits, objfile=objstrfil, $
+                              objstr=obj_strct, outfil=outfil, $
+                              reduxdir=reduxdir, NOPLOT=noplot, /STD, $
+                              CHK=chk, /HELIO_CORR, OBJNAME=objname)
+           endelse
+           if result NE 0 then begin
+           		fire_siren, func_name + ": ERROR extracting object!  Skipping this exposure...", WIDGET=WIDGET, /append, /both
+           		fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+           		continue
+           endif else begin
+	           fire_pipe_widget_status, "    ...done extracting object", $
+	                                    VERBOSE=verbose, WIDGET=widget, $
+	                                    _EXTRA = keys
+				endelse	                                    
+           
+        endif else begin
+           
+           print, func_name + ": File " + strtrim(scifil,2) + $
+                  " already extracted (object structure file = " + $
+                  objstrfil + ") and /clobber not passed!  Skippping..."
+           
+           fire_pipe_widget_status, $
+              "    ...done extracting object (already existed, /clobber not passed)", $
+           		VERBOSE=verbose, WIDGET=widget, _EXTRA = keys
+           
+        endelse
+        
+     ;;;;;;;;;;; CALIBRATE AND EXTRACT TELLURICS ;;;;;;;;;;;;;
+        
+        ; Now get and extract the telluric files for each visit
+
+        if bad_tells EQ 1 then begin
+				fire_siren, "No tellurics matched to this exposure!", WIDGET=WIDGET, /append, /both
+            fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+				continue 
+        endif
+
+         fire_pipe_widget_status, "  Extracting " + fire_string(ntells) $
+               + " telluric files for this exposure (" + $
+               fire_str_array_to_str(fire_string(fire_get_fitnum(tell)) ) + ")", $
+           		VERBOSE=verbose, WIDGET=widget, _EXTRA = keys
+        
+        for itel=0, ntells-1 do begin
+           
+           telfile = tell[itel] ;; name of first telluric file
+           
+;; Check is we've already extracted during this run of the pipeline.  If so, skip ahead.
+;; Notice that this is different then clobber being set or not.  If the user sets /clobber,
+;; he wants a single telluric file re-done once, not once for every science exposure input.
+           if is_undefined(tellsdone) EQ 0 then begin
+              if max( strmatch(tellsdone, telfile) ) EQ 1 then begin
+                 msg = "Skipping telluric file " + fire_get_fitnum(telfile) + " (" + fire_string(itel+1) + $
+                        " of " + fire_string(ntells) + "; already visited for this pipeline run.)"
+                 print, func_name + ": " + msg
+                 fire_pipe_widget_status, "    ..." + msg, VERBOSE=verbose, WIDGET=widget, _EXTRA = keys
+                 fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+                 continue
+              endif
+            endif
+      	  msg = "Analyzing telluric file " + telfile + " (" + fire_string(itel+1) + $
+               " of " + fire_string(ntells) + ")"
+			  print, func_name + ": " + msg
+			  fire_pipe_widget_status, "    " + msg + "...", VERBOSE=verbose, WIDGET=widget, _EXTRA = keys          
+           
+           
+           tarc   = (fire_get(scistruct, /TARCS))[0]
+
+;; Determine the important file names
+           
+           pixflat = fire_get(scistruct, /Pixflatfile)
+           illum   = fire_get(scistruct, /Illumflatfile)
+           rawpath = scistruct.rawpath
+           ordrfil = fire_get(scistruct, /Orderfile)
+           ostrfil = fire_get(scistruct, /Ordr_str_file)
+           twcfits = fire_get(scistruct, /ARCFITS, /THAR, STD=itel+1, /DONOTSET)                    ;; output wavelength calibration fits filename
+           twcimg  = fire_get(scistruct, /ARCIMGFITS, /THAR, STD=itel+1, /DONOTSET)                 ;; output wavelength calibration image filename
+           tobjname = fire_get(scistruct, /TELLNAME) + " (" + fire_get_fitnum( telfile ) + ")"
+           
+           if keyword_set(VERBOSE) then begin
+              print, ''
+              print, "++++++++++++++++++++++++++++++++++++"
+              print, func_name, ": /VERBOSE flag passed."
+              print, "-------- TELLURIC --------"
+              print, "WAVELENGTH CALIBRATION details:"
+              print, ""
+              print, "Important input values:"
+              print, "Telluric file: ", telfile
+              print, "Rawpath to data: ", rawpath
+              print, "Wavelength calibration file: ", tarc
+              print, "Pixel flat file name: ", pixflat
+              print, "Illumination flat file name: ", illum
+              print, "Order file name: ", ordrfil
+              print, "Order structure file name: ", ostrfil
+              print, ""			
+              print, "Output file names will be:"
+              print, "wavelength calibration fits file: ", twcfits
+              print, "wavelength calibration image file: ", twcimg
+              print, ""
+           	  print, "General info:"
+              print, "Pass /chk? ", yes_if_defined(CHK)
+              print, "Clobber? ", yes_if_defined(CLOBBER)
+              print, "++++++++++++++++++++++++++++++++++++"
+              print, ''
+              if keyword_set(DEBUG) then stop
+           endif		
+
+	;; Determine the name of the output structure file
+           objstrfil = fire_get(scistruct, /TOBJSTRFILE, STD=itel+1)
+           
+           if (x_chkfil(objstrfil, /SILENT) NE 0) AND NOT keyword_set(CLOBBER) then begin
+              print, func_name + ": File " + objstrfil + $
+                     " already exists, /clobber not passed!  Skipping..."
+               fire_pipe_widget_status, "    ...done extracting telluric file " + fire_get_fitnum(telfile) + " (" + $
+						fire_string(itel+1) + " of " + fire_string(ntells) + ") (already extracted, /clobber not passed)", $
+						VERBOSE=verbose, WIDGET=widget, _EXTRA = keys
+				  fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+              continue
+           endif
+
+           if (x_chkfil(ordrfil) EQ 0) then begin
+	           fire_siren, "You should have generated an order mask already.  Skipping this exposure!", $
+	           		WIDGET=WIDGET, /append, /both
+	           fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+	           continue              
+           endif else begin
+              tset_slits = xmrdfits(ordrfil, 1)
+           endelse
+
+				lampon = 0
+				; Determine the wavelength solution for the Telluric
+				if (x_chkfil(twcimg, /SILENT) EQ 1) AND NOT keyword_set(CLOBBER) then begin
+
+					fire_pipe_widget_status, $
+						"    ...done with telluric wavelength calibration (already existed, /clobber not passed)", $
+						WIDGET=WIDGET, VERBOSE=verbose, /append, /both					
+				
+				endif else begin ;; need to create the file
+
+					if (is_empty(tarc) EQ 1) then begin
+
+						fire_siren, "No arc matched to telluric calibrator!  Skipping this exposure!", WIDGET=WIDGET, /append, /both
+              		fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+						continue
+					
+						; Panic...there is no arc for the
+						; telluric.  Scramble to find a
+						; wavelength solition from nearby
+						; science data
+
+						;if (x_chkfil(wcimg, /SILENT)) then begin
+						;	waveimg = xmrdfits(wcimg)           
+							;print, "-------------------------------------------------------"
+							;print, "WARNING: NO arc matched to telluric calibrator"
+							;print, "WARNING: I will attempt to use soln from the nearest "
+							;print, "WARNING: science target.  This may be dangerous.  Press" 
+							;print, "WARNING: .con to try."
+							;print, "-------------------------------------------------------"
+							;tarc = wcfile
+						;endif else begin
+							;print, "-------------------------------------------------------"
+							;print, "PANIC: CANNOT FIND ANY ARC SOLUTIONS FOR SCI OR TELLURIC "
+							;print, "PANIC: FRAMES.  PUNTING ON THIS OBJECT.  You may want to go"
+							;print, "PANIC: back and edit the fire structure by hand."
+							;print, "PANIC: Press .con to continue."
+							;print, "-------------------------------------------------------"
+						;endelse
+
+					endif else begin ;; is_empty(tarc) EQ 0
+
+						if (x_chkfil(tarc) EQ 0) then begin
+
+							fire_siren, "Matched arcfile does not exist!  Skipping this exposure!", WIDGET=WIDGET, /append, /both
+              			fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+							continue			
+					
+						endif else begin ;; tarc exists.
+					
+							lampon = strtrim(sxpar(headfits(tarc),"LAMP"),2) EQ 'ThAr'
+							; First generate wavelength solution
+							if (lampon) then begin
+								result = fire_arc2(arcraw = tarc, ordr_str=mrdfits(ostrfil,1), $
+								arcfits=twcfits, NOPLOT=noplot, $
+								arcimgfits=twcimg, reduxpath=reduxpath, $
+									/ThAr, CHK=chk, CLOBBER=clobber, OBJNAME=tobjname $
+									, ORDERMASK=ordrfil, ERR_MESSAGE=err_message)
+								if result EQ -1 then begin
+									fire_siren, func_name + ": Telluric wavelength calibration FAILED (" + err_message + ")!  Skipping exposure.", WIDGET=WIDGET, /append, /both
+              					fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+									continue
+								endif
+							endif else begin ;; lamp on
+								fire_siren, "Lamp not on for telluric wavelength calibration file (" + tarc + ")!" + $
+								"  Will attempt to use OH lines.  Check your results!", WIDGET=WIDGET, /append, /both
+
+								result = fire_arc2(arcraw = tarc, ordr_str=mrdfits(ostrfil,1), $
+									arcfits=twcfits, NOPLOT=noplot, $
+									arcimgfits=twcimg, reduxpath=reduxpath, $
+									/OH, CHK=chk, CLOBBER=clobber, OBJNAME=tobjname $
+									, ORDERMASK=ordrfil, ERR_MESSAGE=err_message)
+
+								if result EQ -1 then begin
+									fire_siren, func_name + ": Telluric wavelength calibration FAILED (" + err_message + ")!  Skipping exposure.", WIDGET=WIDGET, /append, /both
+									fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+									continue
+								endif else begin
+									fire_pipe_widget_status, $
+										"    ...done with telluric wavelength calibration", $
+										WIDGET=WIDGET, VERBOSE=verbose, /append, /both										
+								endelse
+							endelse ;; lamp not on
+
+						endelse ;; xchkfil(tarc)
+
+					endelse ;; is_empty(tarc)
+
+				endelse ;; file needs to be created: doesn't exist, or /clobber
+
+
+
+
+				;; Read in the wavelength image (just created by fire_arc)
+				if (x_chkfil(twcimg) EQ 0) then begin
+				   fire_siren, "Telluric wavelength calibration image (" + twcimg + ") does not exist!" + $
+				   "  fire_arc FAILED!  Skipping exposure...", WIDGET=WIDGET, /append, /both
+				   continue
+				   ;; If it has, then read it in.
+				endif else begin
+				   waveimg = xmrdfits(twcimg)
+				endelse		
+
+     
+           ;;  END OF ARC FITTING. ;;;;
+           
+                               ; NOW PROCESS AND EXTRACT
+
+           ; NOW PROCESS AND EXTRACT
+
+				;; Determine the important file names
+           objstrfil = fire_get(scistruct, /TOBJSTRFILE, STD=itel+1)
+           outfil = fire_get(scistruct, /TECHEXTFILE, STD=itel+1) 
+           outfilzip = outfil + '.gz' ;; doesn't appear to be used...
+           
+           ;; If /verbose is passed, then print out current values of key variables
+           if keyword_set(VERBOSE) then begin
+              print, ''
+              print, "++++++++++++++++++++++++++++++++++++"
+              print, func_name, ": /VERBOSE flag passed."
+              print, "-------- TELLURIC --------"
+              print, "EXTRACTION details:"
+              print, ""
+              print, "Important input values:"
+              print, "Telluric file: ", telfile
+              print, "Rawpath to data: ", rawpath
+              print, "Wavelength calibration file: ", tarc
+              print, "Pixel flat file name: ", pixflat
+              print, "Illumination flat file name: ", illum
+              print, "Order file name: ", ordrfil
+              print, "Order structure file name: ", ostrfil
+              print, ""			
+              print, "Output file names will be:"
+              print, "Object structure file: ", objstrfil
+              print, "Extracted object file: ", outfil
+              print, ""
+              print, "General info:"
+              print, "Pass /chk? ", yes_if_defined(CHK)
+              print, "Clobber? ", yes_if_defined(CLOBBER)
+              print, "++++++++++++++++++++++++++++++++++++"
+              print, ''
+              if keyword_set(DEBUG) then stop
+           endif		
+           
+                                ; Check to see that we haven't already extracted it.
+           if (x_chkfil(objstrfil, /SILENT) EQ 0) OR keyword_set(CLOBBER) then begin
+              
+                                ; Trim, flat field, etc
+              fire_proc, telfile, sciimg, sciivar, hdr=scihdr, $
+                         pixflatfile=pixflat,$
+                         illumflatfile=illum, /MASKBADPIX
+              
+              ;; If an arc for the telluric was used above, then construct a 
+              ;; pixel image from it.              
+              if ( is_empty(tarc) EQ 1 ) then begin
+
+                 
+                 fire_proc, wcfile, wcimg, wcimgivar, hdr=wcimghdr, $
+                            pixflatfile=pixflat,$
+                            illumflatfile=illum, /MASKBADPIX
+
+                 piximg = fire_makescipix(wcimg, tset_slits, arc2=wcimg, CHK=chk) 
+              endif else begin
+                 ; Always use the ThAr arc for telluric calibrations
+                 ; The sky is too faint for ~1 second exposures.
+                 fire_proc, tarc, tmparcimg, tmparcivar, hdr=tmparchdr, $
+                            pixflatfile=pixflat,$
+                            illumflatfile=illum, /MASKBADPIX
+                 piximg = fire_makescipix(tmparcimg, tset_slits, arc2=tmparcimg, CHK=chk, /THAR)
+              endelse
+
+				if size(piximg, /type) EQ 2 then begin
+					fire_siren, func_name + ": ERROR with fire_makescipix!  Skipping this exposure for now...", $
+					WIDGET=WIDGET, /append, /both
+			  		fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+	         	continue
+				endif
+
+                                ; Fit the 2D sky
+              skyimage = fire_skymodel(sciimg=sciimg, sciivar=sciivar, piximage=piximg $
+                                       ,tset_slits=tset_slits)
+
+           ;; Object Finding
+           imgminsky=sciimg-skyimage
+           obj_strct = fire_findobj(img_minsky=imgminsky,$
+                                    sciivar=sciivar,waveimg=10^waveimg,$
+                                    tset_slits=tset_slits,filstd=filstd, CHK=chk)
+           
+           ; Extract the Telluric - Boxcar (FAST)
+           result = fire_echextobj(sciimg=sciimg, sciivar=sciivar, scihdr=scihdr, $
+                           skyimage=skyimage,$
+                           piximg=piximg, waveimg=10^waveimg, $
+                           tset_slits=tset_slits, objfile=objstrfil, $$
+                           objstr=obj_strct, outfil=outfil, /STD, NOPLOT=noplot, $
+                           /HELIO_CORR, REDUXDIR=reduxdir, CHK=chk, OBJNAME=tobjname)
+           if result NE 0 then begin
+           		fire_siren, func_name + ": ERROR extracting telluric!  Skipping this telluric...", WIDGET=WIDGET, /append, /both
+					fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+           		continue
+           endif 
+
+	;; Mark this telluric file as being processed this data run.
+           if is_undefined(tellsdone) EQ 0 then begin
+              tellsdone = [ tellsdone, telfile ]
+           endif else begin
+              tellsdone = [telfile]
+           endelse
+
+           fire_pipe_widget_status, "    ...done extracting telluric file " + fire_get_fitnum(telfile) + " (" + $
+                                    fire_string(itel+1) + " of " + fire_string(ntells) + ")", VERBOSE=verbose, WIDGET=widget, _EXTRA = keys
+           
+        endif else begin
+        
+           print, func_name + ": File " + strtrim(scifil,2) + " already extracted, skipping..."
+           fire_pipe_widget_status, "    ...done extracting telluric file " + $
+                                    fire_get_fitnum(telfile) + " (" + $
+                                    fire_string(itel+1) + " of " + $
+                                    fire_string(ntells) + ") (Already extracted and /clobber not passed)", $
+                                    VERBOSE=verbose, WIDGET=widget, _EXTRA = keys
+           
+        endelse
+        
+        
+     endfor ;; cycle through tellurics
+              
+              fire[sci[iframe]] = scistruct ;; save any changes made to the structure
+              
+           endfor ;; iframe, cycle through science frames for a target
+           
+           
+           
+        endfor ;; cycle through targets
+
+	RETURN
+        
+END
