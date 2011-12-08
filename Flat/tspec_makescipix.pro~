@@ -73,7 +73,7 @@ FUNCTION tspec_makescipix, arcimg, tset_slits, $
                              , BAD_SLITS=badslits, _EXTRA = keys ) 
 
   endelse
-  stop
+  
   wset = wset_arc
 
   ; Only fall back on the ThAr spectrum for orders with bad pixel fits.

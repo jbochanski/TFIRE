@@ -551,7 +551,7 @@ function tspec_echextobj,SCIIMG=sciimg,SCIIVAR=sciivar,SCIHDR=scihdr,SKYIMAGE=sk
 
      
      ;;;;;;;; OPTIMAL EXTRACTION CASE ;;;;;;;;;
-stop
+
      IF NOT KEYWORD_SET(BOXCAR) THEN BEGIN
         extract_struct = tspec_localskysub(sciimg, sciivar, skyimage $
                                           , piximg, waveimg, ximg, objstr $

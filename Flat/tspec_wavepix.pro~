@@ -97,7 +97,7 @@ function tspec_wavepix, arcimg, tset_slits $
    nslit = n_elements(slit_order)
    IF KEYWORD_SET(ONLY_SLITS1) THEN ONLY_SLITS = ONLY_SLITS1 $
    ELSE ONLY_SLITS = lindgen(nslit) + 1L
-   IF n_elements(fwhm1) EQ 0 THEN FWHM = replicate(1.2, nslit) $ ;sjs dec 7
+   IF n_elements(fwhm1) EQ 0 THEN FWHM = replicate(5.0, nslit) $
    ELSE IF n_elements(fwhm1) EQ 1 THEN FWHM = replicate(fwhm1, nslit) $
    ELSE IF n_elements(fwhm1) EQ nslit THEN fwhm = fwhm1 $
    ELSE message, 'Bad size for fwhm input'
@@ -131,7 +131,7 @@ function tspec_wavepix, arcimg, tset_slits $
    pk_arr  = fltarr(200, 500, nslit)
 
    for ii = 0L, nslit-1L do begin 
-
+		;;print, 'ii = ', ii
        islit = slit_order[ii]
        ionly = WHERE(ONLY_SLITS EQ (islit+1L), nonly)
        IF nonly EQ 0 THEN CONTINUE
@@ -167,9 +167,8 @@ function tspec_wavepix, arcimg, tset_slits $
       ;; Identify + trace the arc lines, and fit by polynomials
       arc_rect = reform(arc_rect, ny, ns)           ; case where ns=1
       arc_rect_ivar = reform(arc_rect_ivar, ny, ns) ; case where ns=1
-      what = arc_rect
-;      if ((ii GE nslit-2) AND keyword_set(THAR)) then begin
-      if (ii GE nslit-4) then begin
+      
+      if ((ii GE nslit-2) AND keyword_set(THAR)) then begin
          
          ;; Subtract off an estimate of the continuum using...
          
@@ -183,7 +182,6 @@ function tspec_wavepix, arcimg, tset_slits $
                sset = bspline_iterfit(xfit[non_zro],arc_rect[non_zro,is], nbkpts=80, niters=5, upper=3, lower=10)
                yfit_cont = bspline_valu(xfit[non_zro],sset)			
                arc_rect[non_zro,is] -= yfit_cont
-
             endfor
             
             ;; ...or a median filter			
@@ -263,7 +261,7 @@ function tspec_wavepix, arcimg, tset_slits $
         ;xatv, arc_rect, /block			
          
       endif
-
+      
       arc1d = fltarr(ny)
       mid = ns/2
       ;; Median filtering is more robust against cosmics
@@ -292,18 +290,18 @@ function tspec_wavepix, arcimg, tset_slits $
          result = -1
          if result NE 0 then begin
                         
-            if (ii LT nslit-5) then begin
+            if (ii LT nslit-2) then begin
                x_fndpeaks, arc1d, peak_pos0, NSIG = 30.D $
                            , PKWDTH = pkwdth, TOLER = TOLER $
                            , THIN=THIN, NORDB = fordr, /fweight
                
              ;;;;;;;;;;; If needed, drop the threshold
-               sigvec = [100.D,75.D,50.D,25.D,20.D,15.D,10.D,5.0D,3.0D]
+               sigvec = [25.D,20.D,15.D,10.D,5.0D,3.0D]
                isig = 0
-               while (peak_pos0[0] EQ -1L OR N_ELEMENTS(PEAK_POS0) LE 15 $
+               while (peak_pos0[0] EQ -1L OR N_ELEMENTS(PEAK_POS0) LE 5 $
                       AND isig LT 5) do begin
                   x_fndpeaks, smooth(arc1d,3), peak_pos0, NSIG = sigvec[isig], $
-                              /silent, PKWDTH = pkwdth, TOLER = TOLER, ICLSE = 10L, $
+                              /silent, PKWDTH = pkwdth, TOLER = TOLER, $
                               THIN=THIN, NORDB = fordr, /fweight
                   isig++
                ENDWHILE
@@ -320,13 +318,13 @@ function tspec_wavepix, arcimg, tset_slits $
                endif
 
             endif else begin
-               sig_array = [125.D,100.D,75.D,50.D, 25.D,20.D,15.D,10.D,7.0D,5.0D]
+               sig_array = [50.D, 25.D,20.D,15.D,10.D,7.0D,5.0D]
                for iii=0, n_elements(sig_array)-1 do begin
                   x_fndpeaks, arc1d, peak_pos0, NSIG = sig_array[iii], /silent $
-                              , PKWDTH = pkwdth, TOLER = TOLER $;, ICLSE = 10L $
+                              , PKWDTH = pkwdth, TOLER = TOLER $
                               , THIN=THIN, NORDB = fordr, /fweight
-                       
-                  if n_elements(peak_pos0) GE 15 then break
+                                ;             print, "iii = ", iii
+                  if n_elements(peak_pos0) GE 3 then break
                endfor
                if (keyword_set(CHK)) then begin
                   print, ii
@@ -336,7 +334,7 @@ function tspec_wavepix, arcimg, tset_slits $
             endelse
             
          endif ;; end, use x_fndpeaks
-
+         
          npeaks = n_elements(peak_pos0)
          if npeaks EQ 0 then begin
             fire_siren, func_name + ": No lines found first pass!  Skipping this order..."
@@ -349,8 +347,8 @@ function tspec_wavepix, arcimg, tset_slits $
                              , radius = fwhm[islit], thresh = thresh1 $
                              , nave = nave $
                              , maxshift0 = maxshift0, maxshifte = maxshifte)
-stop;         p1 = peaks
-        p1 = peaks            ;; Fit polynomials to output traces.
+         
+            ;; Fit polynomials to output traces.
          sigs  = make_array( npeaks, 1, /double )
          tilts = make_array( npeaks, 1, /double )
          crude_pol_order = 2
@@ -366,11 +364,11 @@ stop;         p1 = peaks
             endfor
             peaks[*,n] = new_pos1
          endfor
-         stop
+         
          if (ii GT 0) AND (is_undefined(medtilt) EQ 0) then medtilt_last = medtilt
          
          stdtilt = 0;-0.22
-         gdtilt = where(abs(tilts-stdtilt) LT 0.1 and tilts ne 0, ngdtilt)
+         gdtilt = where(abs(tilts-stdtilt) LT 0.1, ngdtilt)
          if (ngdtilt GT 0) then begin
             medtilt = median(tilts[gdtilt])
          endif else begin

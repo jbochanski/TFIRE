@@ -46,7 +46,7 @@ function tspec_skymodel, SCIIMG=sciimg, SCIIVAR=sciivar, $
      print, ''
      if keyword_set(CHECK_INPUTS) then RETURN, 0
   endif
-
+  
   bsp   = 0.3                    ;tweaking sky model
   FWHM  = 2.5
   npoly = 2
@@ -57,13 +57,13 @@ function tspec_skymodel, SCIIMG=sciimg, SCIIVAR=sciivar, $
   slitmask = long_slits2mask(tset_slits)
   ;; aggresive edge masking because of order flexure
   ximg = long_slits2x(tset_slits, edgmask = edgmask,TOL_EDG=0)
-  stop
+  
   skyimage = long_skysub(sciimg, sciivar, piximage, slitmask, skymask, edgmask $
                          , bsp = bsp, ISLIT = ISLIT, npoly=npoly)
 
   skyimage = long_skysub(sciimg, sciivar, piximage, slitmask, skymask, edgmask $
                          , bsp = 1, ISLIT = ISLIT, npoly=npoly)
-  ;to view: xatv,(sciimg - skyimage),WVIMG = waveimg,/block,min = -50,max =200
+
   if (keyword_set(CHK)) then begin
      FOR iorder=0, 20 do begin
         order = iorder

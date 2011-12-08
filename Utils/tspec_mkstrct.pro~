@@ -267,7 +267,7 @@ PRO FIRE_GUESS_EXPTYPE, data, LOUD=loud, VERBOSE=verbose, $
   for ifile=0, nfiles-1 do begin
      
      bad_hdr = 0
-     hdr = tspec_get(data[ifile], /HDR)
+     hdr = fire_get(data[ifile], /HDR)
      if (n_elements(hdr) LE 1) then begin
         bad_hdr = 1
         continue

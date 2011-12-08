@@ -431,7 +431,7 @@ pro tspec_pipe, fire, targets=targetnames, clobber=clobber, $
 ;; he or she wants a single telluric file re-done once, not once for every science exposure input.
            if is_undefined(tellsdone) EQ 0 then begin
               if max( strmatch(tellsdone, telfile) ) EQ 1 then begin
-                 msg = "Skipping telluric file " + tspec_get_fitnum(telfile) + " (" + fire_string(itel+1) + $
+                 msg = "Skipping telluric file " + tpsec_get_fitnum(telfile) + " (" + fire_string(itel+1) + $
                         " of " + fire_string(ntells) + "; already visited for this pipeline run.)"
                  print, func_name + ": " + msg
                  fire_pipe_widget_status, "    ..." + msg, VERBOSE=verbose, WIDGET=widget, _EXTRA = keys
